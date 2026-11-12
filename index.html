@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>QNS Names — .qom directory (QL1)</title>
+<meta name="description" content="Directory of every registered QNS (.qom) name on QL1, with a direct on-chain check for whether a name is taken. Digit-first alphabetical order, searchable, filterable by name length (5+ grouped). A read-only community tool." />
+<style>
+  :root{ --bg:#ffffff; --fg:#16181d; --mut:#5b6472; --card:#f4f6f9; --line:#e2e7ee; --acc:#1f6dff; --ok:#1a7f4b; --warn:#b3541e; }
+  html[data-theme="black"]{ --bg:#0d1015; --fg:#eef1f6; --mut:#9aa5b4; --card:#161b23; --line:#262e3b; --acc:#6ea8ff; --ok:#4cc38a; --warn:#e8a06a; }
+  *{ box-sizing:border-box; }
+  body{ margin:0; background:var(--bg); color:var(--fg); font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans JP",sans-serif; }
+  .wrap{ max-width:860px; margin:0 auto; padding:28px 18px 56px; }
+  header{ display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
+  h1{ font-size:26px; margin:0 0 6px; }
+  h2{ font-size:17px; margin:26px 0 8px; }
+  .sub{ color:var(--mut); font-size:14px; line-height:1.55; margin:0 0 4px; }
+  .tools{ display:flex; gap:8px; flex-shrink:0; }
+  button.tgl{ background:var(--card); color:var(--fg); border:1px solid var(--line); border-radius:999px; padding:6px 13px; font-size:13px; cursor:pointer; }
+  .bar{ display:flex; gap:10px; margin:14px 0 8px; }
+  .bar input{ flex:1; padding:11px 14px; font-size:16px; border:1px solid var(--line); border-radius:12px; background:var(--card); color:var(--fg); }
+  .bar button{ padding:11px 16px; font-size:14px; border-radius:12px; border:1px solid var(--line); background:var(--card); color:var(--fg); cursor:pointer; }
+  .meta{ color:var(--mut); font-size:13px; margin:6px 2px 14px; line-height:1.5; }
+  .chips{ display:flex; flex-wrap:wrap; gap:6px; margin:2px 0 12px; }
+  .chip{ padding:5px 12px; border-radius:999px; border:1px solid var(--line); background:var(--card); color:var(--fg); font-size:13px; cursor:pointer; }
+  .chip.on{ background:var(--acc); color:#fff; border-color:var(--acc); }
+  .row{ display:flex; align-items:center; gap:12px; padding:12px 14px; border:1px solid var(--line); border-radius:12px; margin-bottom:8px; background:var(--card); }
+  .nm{ font-weight:700; font-size:17px; word-break:break-all; }
+  .own{ margin-left:auto; font-size:13px; white-space:nowrap; }
+  .own a{ color:var(--acc); text-decoration:none; font-family:ui-monospace,Menlo,monospace; }
+  .look{ border:1px solid var(--line); border-radius:12px; padding:14px; background:var(--card); }
+  .res{ font-size:14px; line-height:1.65; margin-top:10px; }
+  .res .taken{ color:var(--warn); font-weight:700; }
+  .res .free{ color:var(--ok); font-weight:700; }
+  .res a{ color:var(--acc); text-decoration:none; font-family:ui-monospace,Menlo,monospace; }
+  .empty,.err{ color:var(--mut); padding:26px 10px; text-align:center; font-size:14px; line-height:1.6; }
+  .err{ color:#d24545; }
+  footer{ margin-top:34px; color:var(--mut); font-size:13px; line-height:1.7; border-top:1px solid var(--line); padding-top:16px; }
+  footer a{ color:var(--acc); text-decoration:none; }
+  code{ font-family:ui-monospace,Menlo,monospace; font-size:12px; word-break:break-all; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1 id="t-title">QNS Names</h1>
+      <p class="sub" id="t-sub"></p>
+      <p class="sub" id="t-note"></p>
+    </div>
+    <div class="tools">
+      <button class="tgl" id="langBtn">日本語</button>
+      <button class="tgl" id="themeBtn">🌙</button>
+    </div>
+  </header>
+
+  <h2 id="t-lookH"></h2>
+  <div class="look">
+    <div class="bar" style="margin:0">
+      <input id="lq" type="search" autocomplete="off" spellcheck="false" />
+      <button id="lbtn"></button>
+    </div>
+    <div class="res" id="lres"></div>
+  </div>
+
+  <h2 id="t-listH"></h2>
+  <div class="bar">
+    <input id="q" type="search" autocomplete="off" spellcheck="false" />
+    <button id="reload"></button>
+  </div>
+  <div class="chips" id="chips"></div>
+  <div class="meta" id="meta"></div>
+  <div id="list"></div>
+  <div class="empty" id="empty" hidden></div>
+  <div class="err" id="err" hidden></div>
+
+  <footer id="t-foot"></footer>
+</div>
+
+<script>
+"use strict";
+// ---- config ----
+var REGISTRAR = "0xDCbF4614152a22D1883Ba3929c668B978A3be548"; // QNSBaseRegistrar (.qom), QL1 chain id 766
+var INSTANCES = "https://scan.qom.network/api/v2/tokens/" + REGISTRAR + "/instances";
+var RPCS = [
+  "https://evm-rpc-ql1.mschihuahua.org",
+  "https://scan.qom.network/api/eth-rpc"
+];
+var SEL = { ownerOf: "0x6352211e", nameExpires: "0xd6e4fa86" };
+
+// ---- keccak-256 (verified against reference vectors) ----
+var RC=[0x0000000000000001n,0x0000000000008082n,0x800000000000808an,0x8000000080008000n,0x000000000000808bn,0x0000000080000001n,0x8000000080008081n,0x8000000000008009n,0x000000000000008an,0x0000000000000088n,0x0000000080008009n,0x000000008000000an,0x000000008000808bn,0x800000000000008bn,0x8000000000008089n,0x8000000000008003n,0x8000000000008002n,0x8000000000000080n,0x000000000000800an,0x800000008000000an,0x8000000080008081n,0x8000000000008080n,0x0000000080000001n,0x8000000080008008n];
+var ROT=[0,1,62,28,27,36,44,6,55,20,3,10,43,25,39,41,45,15,21,8,18,2,61,56,14];
+var M64=(1n<<64n)-1n;
+function rotl(x,n){ if(n===0) return x; var b=BigInt(n); return ((x<<b)|(x>>(64n-b)))&M64; }
+function keccakF(s){
+  for(var round=0; round<24; round++){
+    var C=[],D=[],x,y;
+    for(x=0;x<5;x++) C[x]=s[x]^s[x+5]^s[x+10]^s[x+15]^s[x+20];
+    for(x=0;x<5;x++) D[x]=C[(x+4)%5]^rotl(C[(x+1)%5],1);
+    for(y=0;y<5;y++) for(x=0;x<5;x++) s[x+5*y]^=D[x];
+    var B=new Array(25);
+    for(y=0;y<5;y++) for(x=0;x<5;x++) B[y+5*((2*x+3*y)%5)]=rotl(s[x+5*y], ROT[x+5*y]);
+    for(y=0;y<5;y++) for(x=0;x<5;x++) s[x+5*y]=B[x+5*y]^((~B[(x+1)%5+5*y])&B[(x+2)%5+5*y]);
+    s[0]^=RC[round];
+  }
+}
+function keccak256Hex(str){
+  var bytes = Array.from(new TextEncoder().encode(str));
+  var rate=136; var s=new Array(25).fill(0n);
+  bytes.push(0x01);
+  while(bytes.length%rate!==rate-1) bytes.push(0);
+  bytes.push(0x80);
+  for(var off=0; off<bytes.length; off+=rate){
+    for(var i=0;i<rate/8;i++){
+      var lane=0n;
+      for(var j=7;j>=0;j--) lane=(lane<<8n)|BigInt(bytes[off+i*8+j]);
+      s[i]^=lane;
+    }
+    keccakF(s);
+  }
+  var out='';
+  for(var k=0;k<4;k++){
+    var l=s[k];
+    for(var m=0;m<8;m++){ out+=Number(l&0xffn).toString(16).padStart(2,'0'); l>>=8n; }
+  }
+  return out;
+}
+
+// ---- i18n ----
+var STR = {
+  en: {
+    title: "QNS Names",
+    sub: "Every registered QNS (.qom) name on QL1. Names starting with a digit come first, then alphabetical; filter by length if you like.",
+    note: "A read-only community tool. It stores nothing and edits nothing.",
+    lookH: "Check whether a name is taken",
+    lookPh: "Type a name, e.g. startup (the .qom part is optional)",
+    lookBtn: "Check",
+    checking: "Checking the contract…",
+    taken: function(name){ return name + " is taken."; },
+    free: function(name){ return name + " is not registered."; },
+    endedNote: "Note: new QNS registrations have ended, so an unregistered name cannot be newly registered at present.",
+    perm: "Permanent (no expiry).",
+    expires: function(d){ return "Expires: " + d; },
+    lookFailed: "Could not check the contract. Please try again in a moment.",
+    listH: "All registered names",
+    searchPh: "Search names…",
+    reload: "Reload",
+    loading: "Reading the directory…",
+    progress: function(n){ return "Reading the directory… " + n.toLocaleString("en-US") + " names so far"; },
+    count: function(n){ return n + (n === 1 ? " name" : " names"); },
+    asOf: function(time){ return "Read at " + time + " · Source: the QL1 explorer\u2019s index of the QNS registrar contract; the check above reads the contract itself."; },
+    noMatch: "No names match your search.",
+    noNames: "No names are registered yet.",
+    failed: "Could not read the directory. Please try Reload in a moment.",
+    owner: "owner",
+    allLen: "All lengths",
+    foot: 'Registrar: <code>' + REGISTRAR + '</code> (QL1, chain id 766). The list comes from the QL1 explorer (Blockscout) index of this contract; a name\u2019s token id is keccak256 of its label, and the availability check asks the contract directly (ownerOf / nameExpires). New registrations have ended. See also the <a href="https://ql1-infinite42-guppy-histoire.github.io/guppys-guide-dashboard/">Guppy\u2019s Guide dashboard</a>. Developed by the community.'
+  },
+  ja: {
+    title: "QNS 名前一覧",
+    sub: "QL1 の QNS（.qom）で取得済みの名前の全一覧。数字で始まる名前を先に、続いてアルファベット順に並べています。文字数での絞り込みもできます。",
+    note: "コミュニティによる読み取り専用ツールです。何も保存せず、何も編集しません。",
+    lookH: "名前が取得済みか確認",
+    lookPh: "名前を入力（例：startup。.qom はあってもなくても可）",
+    lookBtn: "確認",
+    checking: "コントラクトに確認中…",
+    taken: function(name){ return name + " は取得済みです。"; },
+    free: function(name){ return name + " は未取得です。"; },
+    endedNote: "※ QNS の新規登録は終了しているため、未取得でも現在は新規に取得できません。",
+    perm: "期限なし（永久）です。",
+    expires: function(d){ return "有効期限：" + d; },
+    lookFailed: "コントラクトを確認できませんでした。少し待ってお試しください。",
+    listH: "取得済みの名前一覧",
+    searchPh: "名前を検索…",
+    reload: "再読み込み",
+    loading: "一覧を読み取り中…",
+    progress: function(n){ return "一覧を読み取り中… これまでに " + n.toLocaleString("ja-JP") + " 件"; },
+    count: function(n){ return n + " 件の名前"; },
+    asOf: function(time){ return "読み取り時点：" + time + " · 一覧の出典は QNS レジストラコントラクトに対する QL1 エクスプローラー（Blockscout）の索引。上の取得確認はコントラクトを直接読みます。"; },
+    noMatch: "検索に一致する名前はありません。",
+    noNames: "まだ名前は登録されていません。",
+    failed: "一覧を読めませんでした。少し待って再読み込みしてください。",
+    owner: "所有者",
+    allLen: "すべての文字数",
+    foot: 'レジストラ：<code>' + REGISTRAR + '</code>（QL1、チェーン ID 766）。一覧はこのコントラクトに対する QL1 エクスプローラー（Blockscout）の索引から取得しています。各名前のトークン ID はラベルの keccak256 で、取得確認はコントラクトへ直接問い合わせます（ownerOf / nameExpires）。新規登録は終了しています。あわせて<a href="https://ql1-infinite42-guppy-histoire.github.io/guppys-guide-dashboard/">Guppy\u2019s Guide ダッシュボード</a>もご覧ください。コミュニティによる開発です。'
+  }
+};
+var lang = localStorage.getItem("qns-names-lang") || "en";
+if (!STR[lang]) lang = "en";
+function S(){ return STR[lang]; }
+function applyLang(){
+  var s = S();
+  document.documentElement.lang = lang;
+  document.getElementById("t-title").textContent = s.title;
+  document.getElementById("t-sub").textContent = s.sub;
+  document.getElementById("t-note").textContent = s.note;
+  document.getElementById("t-lookH").textContent = s.lookH;
+  document.getElementById("lq").placeholder = s.lookPh;
+  document.getElementById("lbtn").textContent = s.lookBtn;
+  document.getElementById("t-listH").textContent = s.listH;
+  document.getElementById("q").placeholder = s.searchPh;
+  document.getElementById("reload").textContent = s.reload;
+  document.getElementById("t-foot").innerHTML = s.foot;
+  document.getElementById("langBtn").textContent = lang === "en" ? "日本語" : "English";
+  buildChips();
+  render();
+}
+document.getElementById("langBtn").onclick = function(){
+  lang = lang === "en" ? "ja" : "en";
+  localStorage.setItem("qns-names-lang", lang);
+  applyLang();
+};
+// ---- theme ----
+var theme = localStorage.getItem("guppy-theme") || "white";
+function applyTheme(){
+  document.documentElement.dataset.theme = theme === "black" ? "black" : "white";
+  document.getElementById("themeBtn").textContent = theme === "black" ? "☀️" : "🌙";
+}
+document.getElementById("themeBtn").onclick = function(){
+  theme = theme === "black" ? "white" : "black";
+  localStorage.setItem("guppy-theme", theme);
+  applyTheme();
+};
+applyTheme();
+
+// ---- list loading (Blockscout instances, paginated) ----
+var DATA = null; // [{label, name, owner}]
+function fetchPage(url){
+  return fetch(url).then(function(r){ if (!r.ok) throw new Error("http " + r.status); return r.json(); });
+}
+function load(){
+  document.getElementById("err").hidden = true;
+  document.getElementById("meta").textContent = S().loading;
+  var rows = [];
+  function step(url){
+    return fetchPage(url).then(function(d){
+      (d.items || []).forEach(function(it){
+        var full = it && it.metadata && typeof it.metadata.name === "string" ? it.metadata.name : null;
+        if (!full) return;
+        var label = full.replace(/\.qom$/i, "");
+        var owner = it.owner && typeof it.owner.hash === "string" ? it.owner.hash : null;
+        rows.push({ label: label, name: full, owner: owner });
+      });
+      document.getElementById("meta").textContent = S().progress(rows.length);
+      var nx = d.next_page_params;
+      if (nx && nx.unique_token) return step(INSTANCES + "?unique_token=" + encodeURIComponent(nx.unique_token));
+      return rows;
+    });
+  }
+  step(INSTANCES).then(function(all){
+    DATA = all;
+    buildChips();
+    render();
+  }).catch(function(){
+    DATA = null;
+    document.getElementById("meta").textContent = "";
+    var e = document.getElementById("err");
+    e.textContent = S().failed;
+    e.hidden = false;
+    document.getElementById("list").innerHTML = "";
+  });
+}
+
+var LENF = null; // null = all; otherwise 1..4 or "5+" (label length)
+function lenGroup(label){ var n = Array.from(label).length; return n >= 5 ? "5+" : n; }
+function cmpName(a, b){
+  var an = a.label.toLowerCase(), bn = b.label.toLowerCase();
+  var ad = an.charAt(0) >= "0" && an.charAt(0) <= "9" ? 0 : 1;
+  var bd = bn.charAt(0) >= "0" && bn.charAt(0) <= "9" ? 0 : 1;
+  if (ad !== bd) return ad - bd;
+  if (an < bn) return -1; if (an > bn) return 1; return 0;
+}
+function buildChips(){
+  var box = document.getElementById("chips");
+  if (!DATA) { box.innerHTML = ""; return; }
+  var counts = {};
+  DATA.forEach(function(r){ var g = lenGroup(r.label); counts[g] = (counts[g] || 0) + 1; });
+  var groups = [null, 1, 2, 3, 4, "5+"];
+  box.innerHTML = groups.map(function(g){
+    var label = g === null ? S().allLen : (g === "5+" ? "5+" : String(g));
+    var n = g === null ? DATA.length : (counts[g] || 0);
+    if (g !== null && !counts[g]) return "";
+    return '<button class="chip' + (LENF === g ? " on" : "") + '" data-g="' + (g === null ? "" : g) + '">' + label + " (" + n + ")</button>";
+  }).join("");
+  Array.prototype.forEach.call(box.querySelectorAll(".chip"), function(btn){
+    btn.onclick = function(){
+      var v = btn.getAttribute("data-g");
+      LENF = v === "" ? null : (v === "5+" ? "5+" : parseInt(v, 10));
+      buildChips(); render();
+    };
+  });
+}
+
+function render(){
+  var s = S();
+  var list = document.getElementById("list");
+  var empty = document.getElementById("empty");
+  if (!DATA) { list.innerHTML = ""; return; }
+  var q = document.getElementById("q").value.trim().toLowerCase();
+  var rows = DATA.slice().sort(cmpName).filter(function(r){
+    if (LENF !== null && lenGroup(r.label) !== LENF) return false;
+    return !q || r.label.toLowerCase().indexOf(q) !== -1;
+  });
+  var time = new Date().toLocaleString(lang === "ja" ? "ja-JP" : "en-GB", { hour12: false });
+  document.getElementById("meta").textContent =
+    s.count(rows.length) + ((q || LENF !== null) ? " / " + s.count(DATA.length) : "") + " · " + s.asOf(time);
+  list.innerHTML = rows.map(function(r){
+    var own = r.owner ? ('<span class="own">' + s.owner + ' <a href="https://scan.qom.network/address/' + r.owner + '" target="_blank" rel="noopener">' + r.owner.slice(0, 6) + "…" + r.owner.slice(-4) + '</a></span>') : "";
+    return '<div class="row"><span class="nm">' + escapeHtml(r.name) + '</span>' + own + '</div>';
+  }).join("");
+  empty.hidden = rows.length > 0;
+  empty.textContent = DATA.length === 0 ? s.noNames : s.noMatch;
+}
+function escapeHtml(t){
+  return t.replace(/[&<>"']/g, function(c){ return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; });
+}
+document.getElementById("q").addEventListener("input", render);
+document.getElementById("reload").onclick = load;
+
+// ---- direct availability check (ownerOf / nameExpires on the registrar) ----
+function rpcCall(rpc, data){
+  return fetch(rpc, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_call", params: [{ to: REGISTRAR, data: data }, "latest"] }) })
+    .then(function(r){ if (!r.ok) throw new Error("http " + r.status); return r.json(); })
+    .then(function(x){ if (x.error) throw new Error("revert"); return x.result; });
+}
+function callAny(data){
+  var chain = Promise.reject(new Error("start"));
+  RPCS.forEach(function(rpc){ chain = chain.catch(function(){ return rpcCall(rpc, data); }); });
+  return chain;
+}
+function doLookup(){
+  var s = S();
+  var raw = document.getElementById("lq").value.trim().toLowerCase().replace(/\.qom$/i, "");
+  var box = document.getElementById("lres");
+  if (!raw) { box.textContent = ""; return; }
+  box.textContent = s.checking;
+  var idHex = keccak256Hex(raw);
+  callAny(SEL.ownerOf + idHex).then(function(res){
+    var owner = "0x" + res.slice(-40);
+    return callAny(SEL.nameExpires + idHex).then(function(expHex){
+      var exp = BigInt(expHex);
+      var extra = (exp === (2n ** 256n - 1n) || exp > (2n ** 200n)) ? s.perm : (exp > 0n ? s.expires(new Date(Number(exp) * 1000).toLocaleDateString(lang === "ja" ? "ja-JP" : "en-GB")) : "");
+      box.innerHTML = '<span class="taken">' + escapeHtml(s.taken(raw + ".qom")) + '</span> ' + s.owner + ' <a href="https://scan.qom.network/address/' + owner + '" target="_blank" rel="noopener">' + owner.slice(0, 6) + "…" + owner.slice(-4) + '</a>' + (extra ? " · " + escapeHtml(extra) : "");
+    }).catch(function(){
+      box.innerHTML = '<span class="taken">' + escapeHtml(s.taken(raw + ".qom")) + '</span> ' + s.owner + ' <a href="https://scan.qom.network/address/' + owner + '" target="_blank" rel="noopener">' + owner.slice(0, 6) + "…" + owner.slice(-4) + '</a>';
+    });
+  }).catch(function(){
+    // ownerOf reverts for unregistered ids — but only trust that verdict if the
+    // loaded directory also has no such name (guards against RPC hiccups).
+    if (DATA && DATA.some(function(r){ return r.label.toLowerCase() === raw; })){
+      box.textContent = s.lookFailed;
+      return;
+    }
+    box.innerHTML = '<span class="free">' + escapeHtml(s.free(raw + ".qom")) + '</span><br />' + escapeHtml(s.endedNote);
+  });
+}
+document.getElementById("lbtn").onclick = doLookup;
+document.getElementById("lq").addEventListener("keydown", function(e){ if (e.key === "Enter") doLookup(); });
+
+applyLang();
+load();
+</script>
+</body>
+</html>
