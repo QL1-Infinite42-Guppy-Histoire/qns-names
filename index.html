@@ -225,7 +225,9 @@ var STR = {
     foot: 'レジストラ：<code>' + REGISTRAR + '</code>（QL1、チェーン ID 766）。一覧はこのコントラクトに対する QL1 エクスプローラー（Blockscout）の索引から取得しています。各名前のトークン ID はラベルの keccak256 で、取得確認はコントラクトへ直接問い合わせます（ownerOf / nameExpires）。新規登録は終了しています。あわせて<a href="https://ql1-infinite42-guppy-histoire.github.io/guppys-guide-dashboard/">Guppy\u2019s Guide ダッシュボード</a>もご覧ください。コミュニティによる開発です。'
   }
 };
-var lang = localStorage.getItem("qns-names-lang") || "en";
+function lsGet(k){ try { return localStorage.getItem(k); } catch (e) { return null; } }
+function lsSet(k, v){ try { localStorage.setItem(k, v); } catch (e) {} }
+var lang = lsGet("qns-names-lang") || "en";
 if (!STR[lang]) lang = "en";
 function S(){ return STR[lang]; }
 function applyLang(){
@@ -247,11 +249,11 @@ function applyLang(){
 }
 document.getElementById("langBtn").onclick = function(){
   lang = lang === "en" ? "ja" : "en";
-  localStorage.setItem("qns-names-lang", lang);
+  lsSet("qns-names-lang", lang);
   applyLang();
 };
 // ---- theme ----
-var theme = (localStorage.getItem("guppy-theme") === "dark" || localStorage.getItem("guppy-theme") === "black") ? "dark" : "light";
+var theme = (lsGet("guppy-theme") === "dark" || lsGet("guppy-theme") === "black") ? "dark" : "light";
 function applyTheme(){
   if (theme === "dark") document.documentElement.dataset.theme = "dark";
   else document.documentElement.removeAttribute("data-theme");
@@ -259,7 +261,7 @@ function applyTheme(){
 }
 document.getElementById("themeBtn").onclick = function(){
   theme = theme === "dark" ? "light" : "dark";
-  localStorage.setItem("guppy-theme", theme);
+  lsSet("guppy-theme", theme);
   applyTheme();
 };
 applyTheme();
@@ -267,14 +269,22 @@ applyTheme();
 // ---- list loading (Blockscout instances, paginated) ----
 var DATA = null; // [{label, name, owner}]
 function fetchPage(url){
-  return fetch(url).then(function(r){ if (!r.ok) throw new Error("http " + r.status); return r.json(); });
+  return fetch(url).then(function(r){ if (!r.ok) throw new Error("http " + r.status); return r.text(); })
+    .then(function(txt){
+      // next_page_params.unique_token is a huge integer (a token id): JSON.parse
+      // would round it to a float and corrupt the pagination cursor (duplicate
+      // rows across pages), so read the exact digits from the raw text.
+      var m = txt.match(/"next_page_params"\s*:\s*\{\s*"unique_token"\s*:\s*(\d+)/);
+      return { data: JSON.parse(txt), cursor: m ? m[1] : null };
+    });
 }
 function load(){
   document.getElementById("err").hidden = true;
   document.getElementById("meta").textContent = S().loading;
   var rows = [];
   function step(url){
-    return fetchPage(url).then(function(d){
+    return fetchPage(url).then(function(pg){
+      var d = pg.data;
       (d.items || []).forEach(function(it){
         var full = it && it.metadata && typeof it.metadata.name === "string" ? it.metadata.name : null;
         if (!full) return;
@@ -283,8 +293,7 @@ function load(){
         rows.push({ label: label, name: full, owner: owner });
       });
       document.getElementById("meta").textContent = S().progress(rows.length);
-      var nx = d.next_page_params;
-      if (nx && nx.unique_token) return step(INSTANCES + "?unique_token=" + encodeURIComponent(nx.unique_token));
+      if (pg.cursor) return step(INSTANCES + "?unique_token=" + encodeURIComponent(pg.cursor));
       return rows;
     });
   }
@@ -346,7 +355,7 @@ function render(){
   document.getElementById("meta").textContent =
     s.count(rows.length) + ((q || LENF !== null) ? " / " + s.count(DATA.length) : "") + " · " + s.asOf(time);
   list.innerHTML = rows.map(function(r){
-    var own = r.owner ? ('<span class="own">' + s.owner + ' <a href="https://scan.qom.network/address/' + r.owner + '" target="_blank" rel="noopener">' + r.owner.slice(0, 6) + "…" + r.owner.slice(-4) + '</a></span>') : "";
+    var own = r.owner ? ('<span class="own">' + s.owner + ' <a href="https://scan.qom.network/address/' + escapeHtml(r.owner) + '" target="_blank" rel="noopener">' + escapeHtml(r.owner.slice(0, 6) + "…" + r.owner.slice(-4)) + '</a></span>') : "";
     return '<div class="row"><span class="nm">' + escapeHtml(r.name) + '</span>' + own + '</div>';
   }).join("");
   empty.hidden = rows.length > 0;
@@ -362,12 +371,20 @@ document.getElementById("reload").onclick = load;
 function rpcCall(rpc, data){
   return fetch(rpc, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_call", params: [{ to: REGISTRAR, data: data }, "latest"] }) })
     .then(function(r){ if (!r.ok) throw new Error("http " + r.status); return r.json(); })
-    .then(function(x){ if (x.error) throw new Error("revert"); return x.result; });
+    .then(function(x){ if (x.error) { var e = new Error("revert"); e.revert = true; throw e; } return x.result; });
 }
 function callAny(data){
+  var sawRevert = false;
   var chain = Promise.reject(new Error("start"));
-  RPCS.forEach(function(rpc){ chain = chain.catch(function(){ return rpcCall(rpc, data); }); });
-  return chain;
+  RPCS.forEach(function(rpc){
+    chain = chain.catch(function(){
+      return rpcCall(rpc, data).catch(function(e){ if (e && e.revert) sawRevert = true; throw e; });
+    });
+  });
+  return chain.catch(function(e){
+    if (sawRevert) { var re = new Error("revert"); re.revert = true; throw re; }
+    throw e;
+  });
 }
 function doLookup(){
   var s = S();
@@ -381,13 +398,15 @@ function doLookup(){
     return callAny(SEL.nameExpires + idHex).then(function(expHex){
       var exp = BigInt(expHex);
       var extra = (exp === (2n ** 256n - 1n) || exp > (2n ** 200n)) ? s.perm : (exp > 0n ? s.expires(new Date(Number(exp) * 1000).toLocaleDateString(lang === "ja" ? "ja-JP" : "en-GB")) : "");
-      box.innerHTML = '<span class="taken">' + escapeHtml(s.taken(raw + ".qom")) + '</span> ' + s.owner + ' <a href="https://scan.qom.network/address/' + owner + '" target="_blank" rel="noopener">' + owner.slice(0, 6) + "…" + owner.slice(-4) + '</a>' + (extra ? " · " + escapeHtml(extra) : "");
+      box.innerHTML = '<span class="taken">' + escapeHtml(s.taken(raw + ".qom")) + '</span> ' + s.owner + ' <a href="https://scan.qom.network/address/' + escapeHtml(owner) + '" target="_blank" rel="noopener">' + escapeHtml(owner.slice(0, 6) + "…" + owner.slice(-4)) + '</a>' + (extra ? " · " + escapeHtml(extra) : "");
     }).catch(function(){
-      box.innerHTML = '<span class="taken">' + escapeHtml(s.taken(raw + ".qom")) + '</span> ' + s.owner + ' <a href="https://scan.qom.network/address/' + owner + '" target="_blank" rel="noopener">' + owner.slice(0, 6) + "…" + owner.slice(-4) + '</a>';
+      box.innerHTML = '<span class="taken">' + escapeHtml(s.taken(raw + ".qom")) + '</span> ' + s.owner + ' <a href="https://scan.qom.network/address/' + escapeHtml(owner) + '" target="_blank" rel="noopener">' + escapeHtml(owner.slice(0, 6) + "…" + owner.slice(-4)) + '</a>';
     });
-  }).catch(function(){
-    // ownerOf reverts for unregistered ids — but only trust that verdict if the
-    // loaded directory also has no such name (guards against RPC hiccups).
+  }).catch(function(err){
+    // ownerOf reverts for unregistered ids — but only trust that verdict if an
+    // RPC actually confirmed the revert (a network/RPC failure is inconclusive)
+    // and the loaded directory also has no such name (guards against RPC hiccups).
+    if (!err || !err.revert) { box.textContent = s.lookFailed; return; }
     if (DATA && DATA.some(function(r){ return r.label.toLowerCase() === raw; })){
       box.textContent = s.lookFailed;
       return;
